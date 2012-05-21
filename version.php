@@ -1,17 +1,16 @@
 <?php
 /**
- * Autoenrol cohort authentication plugin version information
+ * Autoenrol group plugin version information
  *
- * @package    auth
- * @subpackage mcae
- * @copyright  2011 Andrew "Kama" (kamasutra12@yandex.ru) 
+ * @package    enrol
+ * @subpackage mgae
+ * @copyright  2012 Mark van Hoek
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2012050512;
-$plugin->component = 'auth_mcae';
-$plugin->maturity = MATURITY_RC;
+$plugin->version   = 2012051915;
 $plugin->requires = 2011070100;
-$plugin->release = '0.4';
+$plugin->component = 'enrol_mgae';
+$plugin->cron      = 1;

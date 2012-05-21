@@ -30,117 +30,99 @@ function enrol_mgae_sync($courseId=NULL) {
     global $DB;
     $plugin = enrol_get_plugin('mgae');
     
-    //TODO: If $courseId is not defined, get a list of all courses 
+    //If $courseId is not defined, get a list of all courses 
     //with groups and process each one
     if(empty($courseId)) {
-        mtrace('Enrol mgae called with no courseId');
+        //mtrace('Enrol mgae called with no courseId');
         $courses = $plugin->get_course_ids_having_groups();
         foreach($courses as $courseId) {
             enrol_mgae_sync($courseId);
         }
+        //don't fall out of the loop and process the first/last item again
         return true;
     }
-    mtrace('Enrol mgae called for courseId='.print_r($courseId, true));
+    //mtrace('Enrol mgae called for courseId='.print_r($courseId, true));
 
+    //data integrity check
+    if(!is_numeric($courseId)) {
+        //mtrace("Enrol mgae skipping courseId=$courseId must be numeric");
+        return false;
+    }
+    
     //Check some basics about this course to see if we should bother doing this
     if(!$plugin->is_course_enrollable($courseId)) {
-        mtrace("Enrol mgae skipping courseId=$courseId due to is_course_enrollable()");
+        //mtrace("Enrol mgae skipping courseId=$courseId due to is_course_enrollable()");
         return true;
     }
     
-    // Delimiter
-    $delim = $plugin->get_delimiter();
-
-    // Get the config'd groups to sync.  
-    // Parse the main rules via the replacement logic and put each group rule into an array item
-    $repl_arr_tpl = get_config('enrol_mgae', 'replace_arr');
-    $repl_arr = array();
-    if (!empty($repl_arr_tpl)) {
-        $repl_arr_pre = explode($delim, $repl_arr_tpl);
-        foreach ($repl_arr_pre as $rap) {
-            list($key, $val) = explode("|", $rap);
-            $repl_arr[$key] = $val;
-        };
-    };
-
-    $groupRuleArr_tpl = get_config('enrol_mgae', 'mainrule_fld');
-    //mtrace('get_config says: '.print_r(get_config('enrol_mgae', 'mainrule_fld'), true));
-    $groupRuleArr = array();
-    if (!empty($groupRuleArr_tpl)) {
-        $groupRuleArr = explode($delim, $groupRuleArr_tpl);
-    } else {
-        //$SESSION->mgautoenrolled = TRUE;
-        mtrace("Enrol mgae skipping courseId=$courseId due to empty(\$groupRuleArr_tpl)");
-        return true; //Empty mainrule
-    };
-
+    $groupsInCourse = $plugin->get_course_groups($courseId);
+    if(empty($groupsInCourse)) {
+        //mtrace("Enrol mgae skipping courseId=$courseId due to course has no groups");
+        return true;
+    }
+   
+    if(!$groupRuleArr = $plugin->get_main_rules()) {
+        //mtrace("Enrol mgae skipping courseId=$courseId due to empty(\$groupRuleArr_tpl)");
+        return true;
+    }
     //mtrace(__LINE__.'::$groupRuleArr='.print_r($groupRuleArr, true));
     
-    // Get advanced user data
-    //get_record($table, array $conditions, $fields='*', $strictness=IGNORE_MISSING) {
-    $user = $DB->get_record('user', array('username'=>'guest'), '*', IGNORE_MULTIPLE);
-    
-    profile_load_data($user);
-    profile_load_custom_fields($user);
-    //mtrace('After profile_load_data: $user='.print_r($user, true));
-    
-    $secondrule_fld = get_config('enrol_mgae', 'secondrule_fld');
-    $cust_arr = array();
-    foreach ($user as $key => $val){
-        if (is_array($val)) {
-            $text = (isset($val['text'])) ? $val['text'] : '';
-        } else {
-            $text = $val;
-        };
-
-        // Raw custom profile fields
-        $fld_key = preg_replace('/profile_field_/', 'profile_field_raw_', $key);
-        $cust_arr["%$fld_key"] = ($text == '') ? format_string($secondrule_fld) : format_string($text);
-    }; 
-
-    // Custom profile field values
-    foreach ($user->profile as $key => $val) {
-        $cust_arr["%profile_field_$key"] = ($val == '') ? format_string($secondrule_fld) : format_string($val);
-    };
-
-    // Additional values for email
-    list($email_username,$email_domain) = explode("@", $cust_arr['%email']);
-    $cust_arr['%email_username'] = $email_username;
-    $cust_arr['%email_domain'] = $email_domain;
-
-    
-    foreach ($groupRuleArr as $groupRule) {
+    foreach ($groupRuleArr as &$groupRule) {
         //if a group with a matching name does not exist in this course, skip it
         $groupsInCourse = groups_get_all_groups($courseId);
         if(empty($groupsInCourse)) continue;
         //mtrace(__LINE__.'::$groupname='.$groupname);    
 
-        //get the course users
-        $plugin->get_course_students($courseId);
+        //get the course users with or without groups, 
+        //since we don't know the target group name(s) yet 
+        //(they're in the user profiles)
+        $students = $plugin->get_course_students($courseId);
+        //mtrace(count($students).' students found');
         
-        //check if any users have a profile field with a name matching the main rule
-        //
-        //get the current group name from the user profile
-        $groupname = strtr($groupRule, $cust_arr);
-        mtrace("Enrol mgae says \$groupname=$groupname for \$groupRule=$groupRule; \$cust_arr=".print_r($cust_arr, true));
-        $groupname = (!empty($repl_arr)) ? strtr($groupname, $repl_arr) : $groupname;
-        mtrace("Enrol mgae says second version of \$groupname=$groupname for \$groupRule=$groupRule; \$cust_arr=".print_r($cust_arr, true));
+        foreach($students as &$user) {
+            $cust_arr = $plugin->get_user_data_advanced($user);
+    
+            //get the current group name from the user profile field specified in the main rule
+            $groupName = strtr($groupRule, $cust_arr);
+            //mtrace("Enrol mgae says \$groupname=$groupname for \$groupRule=$groupRule; \$cust_arr=".print_r($cust_arr, true));
+            $repl_arr = $plugin->get_replace_arr();
+            $groupName = (!empty($repl_arr)) ? strtr($groupName, $repl_arr) : $groupName;
+            //mtrace("Enrol mgae says second version of \$groupname=$groupname for \$groupRule=$groupRule; \$cust_arr=".print_r($cust_arr, true));
 
-        if ($groupname == '') {
-            mtrace("Enrol mgae skipping courseId=$courseId due to empty group name");
-            continue; // We don't want an empty group name
-        };
+            if ($groupName == '') {
+                //mtrace("Enrol mgae skipping courseId=$courseId userid={$user->id} due to empty group name");
+                continue; // We don't want an empty group name
+            };
 
-        mtrace(__LINE__.'::$groupname='.$groupname);    
+            //mtrace(__LINE__.'::$groupName='.$groupName);    
 
-        
-        
-        //if the user is already enrolled in the matching group, skip it
-        
-        //check the group actually exists
-//        $cid = array_search($cohortname, $cohorts_list);
-//        if ($cid !== false) {
-//
-//        }
+            //check the group actually exists in the course
+            //mtrace(__LINE__.'::$groupsInCourse='.print_r($groupsInCourse, true));    
+            $targetGroup = false;
+            foreach($groupsInCourse as &$group) {
+                if($group->name==$groupName) {
+                    $targetGroup = $group;
+                    break;
+                }                
+            }
+            unset($group);
+            if(!$targetGroup) {
+                //mtrace("Enrol mgae skipping courseId=$courseId userid={$user->id} due to no matching group with name $groupName");                
+                continue;
+            }
+
+            //if the user is already enrolled in the matching group, skip it
+            if(groups_is_member($targetGroup->id, $user->id)) {
+                //mtrace("Enrol mgae skipping courseId=$courseId userid={$user->id} due to user already enrolled in group $groupName");
+                continue;
+            }
+            
+            //enrol the user in the group
+            //mtrace("Enrol mgae About to add_group_member($targetGroup->id, $user->id)");
+            $plugin->add_group_member($targetGroup->id, $user->id);
+            mtrace("    Enrol mgae enrolled userid=$user->id in group=$targetGroup->id");
+        }
+        unset($user);
     }
+    unset($groupRule);
 }
