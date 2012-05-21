@@ -38,3 +38,4 @@ $string['cohortname'] = 'Group name';
 $string['component'] = 'Component';
 $string['count'] = 'Count';
 
+$string['profile_help'] = 'Available templates';
