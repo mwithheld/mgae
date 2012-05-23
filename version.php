@@ -10,7 +10,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2012051915;
+$plugin->version   = 2012052313;
 $plugin->requires = 2011070100;
 $plugin->component = 'enrol_mgae';
 $plugin->cron      = 1;

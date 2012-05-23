@@ -46,5 +46,5 @@ $student = get_archetype_roles('student');
 $student = reset($student);
 
 $enrol->add_instance($course, array('roleid'=>$student->id));
-enrol_mgae_sync($course->id);
+$enrol->enrol_mgae_do_sync($course->id);
 redirect(new moodle_url('/enrol/instances.php', array('id'=>$course->id)));

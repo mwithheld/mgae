@@ -1,6 +1,7 @@
 <?php
 defined('MOODLE_INTERNAL') || die();
 require_once($CFG->dirroot.'/group/externallib.php');
+require_once("$CFG->dirroot/enrol/mgae/locallib.php");
 
 /**
  *
@@ -107,11 +108,6 @@ class enrol_mgae_plugin extends enrol_plugin {
         return true;
     }
     
-    public function add_group_member($groupid, $userid) {
-        $members = array(array('groupid'=>$groupid, 'userid'=>$userid));
-        return core_group_external::add_group_members($members);
-    }
-    
     public function get_course_groups($courseId) {
         return core_group_external::get_course_groups($courseId);
     }
@@ -179,12 +175,11 @@ class enrol_mgae_plugin extends enrol_plugin {
             return;
         }
 
-        require_once("$CFG->dirroot/enrol/mgae/locallib.php");
-        enrol_mgae_sync();
+        return enrol_mgae_sync();
     }
 
     /**
-     * Called after updating/inserting course.
+     * Course update hook.  Called after updating/inserting course.
      *
      * @param bool $inserted true if course just inserted
      * @param object $course
@@ -192,180 +187,176 @@ class enrol_mgae_plugin extends enrol_plugin {
      * @return void
      */
     public function course_updated($inserted, $course, $data) {
-        global $CFG;
-
-        if (!enrol_is_enabled('mgae')) {
-            return;
-        }
-
-        // sync category enrols
-        require_once("$CFG->dirroot/enrol/mgae/locallib.php");
-        enrol_mgae_sync($course);
+        return $this->cron();
     }
 
     
-    /**
-     * Post enrolment hook
-     *
-     * @param object $user user object, later used for $USER
-     * @param string $username (with system magic quotes)
-     * @param string $password plain text password (with system magic quotes)
-     */
-    function enrol_mgae_sync(stdClass $instance) { //&$user, $username, $password) {
-	global $DB;
-
-        if ($DB->record_exists('user_enrolments', array('userid'=>$USER->id, 'enrolid'=>$instance->id))) {
-            return ob_get_clean();
-        }
-
-        if ($instance->enrolstartdate != 0 && $instance->enrolstartdate > time()) {
-            return ob_get_clean();
-        }
-
-        if ($instance->enrolenddate != 0 && $instance->enrolenddate < time()) {
-            return ob_get_clean();
-        }
-
-        $course = $DB->get_record('course', array('id'=>$instance->courseid));
-        $context = get_context_instance(CONTEXT_COURSE, $course->id);
-
-        $uid = $user->id;
-        // Ignore users from don't_touch list
-        $ignore = explode(",",$this->config->donttouchusers);
-
-        if (!empty($ignore) AND array_search($username, $ignore) !== false) {
-            $SESSION->mcautoenrolled = TRUE;
-            return true;
-        };
-
-        // Ignore guests
-        if ($uid < 2) {
-            $SESSION->mcautoenrolled = TRUE;
-            return true;
-        };
-        
-// ********************** Get COHORTS data
-        $clause = array('contextid'=>$context->id);
-        if ($this->config->enableunenrol == 1) {
-            $clause['component'] = 'enrol_mgae';
-        };
-
-        $cohorts = $DB->get_records('cohort', $clause);
-
-        $cohorts_list = array();
-        foreach($cohorts as $cohort) {
-            $cid = $cohort->id;
-	    $cname = format_string($cohort->name);
-            $cohorts_list[$cid] = $cname;
-        }
-    
-        // Get advanced user data
-        profile_load_data($user);
-        $cust_arr = array();
-        foreach ($user as $key => $val){
-            if (is_array($val)) {
-                $text = (isset($val['text'])) ? $val['text'] : '';
-            } else {
-                $text = $val;
-            };
-
-            // Raw custom profile fields
-            $fld_key = preg_replace('/profile_field_/', 'profile_field_raw_', $key);
-            $cust_arr["%$fld_key"] = ($text == '') ? format_string($this->config->secondrule_fld) : format_string($text);
-        }; 
-
-        // Custom profile field values
-        foreach ($user->profile as $key => $val) {
-            $cust_arr["%profile_field_$key"] = ($val == '') ? format_string($this->config->secondrule_fld) : format_string($val);
-        };
-
-        // Additional values for email
-        list($email_username,$email_domain) = explode("@", $cust_arr['%email']);
-        $cust_arr['%email_username'] = $email_username;
-        $cust_arr['%email_domain'] = $email_domain;
-
-        // Delimiter
-        $delimiter = $this->config->delim;
-        $delim = strtr($delimiter, array('CR+LF' => chr(13).chr(10), 'CR' => chr(13), 'LF' => chr(10)));
-
-        // Calculate a cohort names for user
-        $repl_arr_tpl = $this->config->replace_arr;
-
-        $repl_arr = array();
-        if (!empty($repl_arr_tpl)) {
-            $repl_arr_pre = explode($delim, $repl_arr_tpl);
-            foreach ($repl_arr_pre as $rap) {
-                list($key, $val) = explode("|", $rap);
-                $repl_arr[$key] = $val;
-            };
-        };
-
-        // Generate cohorts array
-        $cohorts_arr_tpl = $this->config->mainrule_fld;
-
-        $cohorts_arr = array();
-        if (!empty($cohorts_arr_tpl)) {
-            $cohorts_arr = explode($delim, $cohorts_arr_tpl);
-        } else {
-            $SESSION->mcautoenrolled = TRUE;
-            return; //Empty mainrule
-        };
-        
-        $processed = array();
-
-        foreach ($cohorts_arr as $cohort) {
-            $cohortname = strtr($cohort, $cust_arr);
-            $cohortname = (!empty($repl_arr)) ? strtr($cohortname, $repl_arr) : $cohortname;
-
-            if ($cohortname == '') {
-                continue; // We don't want an empty cohort name
-            };
-
-            $cid = array_search($cohortname, $cohorts_list);
-            if ($cid !== false) {
-
-                if (!$DB->record_exists('cohort_members', array('cohortid'=>$cid, 'userid'=>$user->id))) {
-                    cohort_add_member($cid, $user->id);
-                    add_to_log(SITEID, 'user', 'Added to cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
-                } else {
-                    add_to_log(SITEID, 'user', 'Already exists in cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
-                };
-            } else {
-                // Cohort not exist so create a new one
-                add_to_log(SITEID, 'user', 'Cohort not exist ID so screate a new one' , "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
-                $newcohort = new stdClass();
-                $newcohort->name = $cohortname;
-                $newcohort->description = "created ". date("d-m-Y");
-                $newcohort->contextid = $context->id;
-                if ($this->config->enableunenrol == 1) {
-                    $newcohort->component = "enrol_mgae";
-                };
-                $cid = cohort_add_cohort($newcohort);
-                cohort_add_member($cid, $user->id);
-
-                add_to_log(SITEID, 'user', 'Added to cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
-            };
-            $processed[] = $cid;
-        };
-        $SESSION->mcautoenrolled = TRUE;
-        
-        //Unenrol user
-        if ($this->config->enableunenrol == 1) {
-        //List of cohorts where this user enrolled
-            $sql = "SELECT c.id AS cid FROM {cohort} c JOIN {cohort_members} cm ON cm.cohortid = c.id WHERE c.component = 'enrol_mgae' AND cm.userid = $uid";
-            $enrolledcohorts = $DB->get_records_sql($sql);
-
-            foreach ($enrolledcohorts as $ec) {
-                if(array_search($ec->cid, $processed) === false) {
-                    cohort_remove_member($ec->cid, $uid);
-                    add_to_log(SITEID, 'user', 'Removed from cohort ID ' . $ec->cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
-                };
-            };
-        };
-
+    function enrol_mgae_do_sync($courseId) {
+        return enrol_mgae_sync($courseId);
     }
-
-}
+    
+//    /**
+//     * Post enrolment hook
+//     *
+//     * @param object $user user object, later used for $USER
+//     * @param string $username (with system magic quotes)
+//     * @param string $password plain text password (with system magic quotes)
+//     */
+//    function enrol_mgae_sync(stdClass $instance) { //&$user, $username, $password) {
+//	global $DB;
+//
+//        if ($DB->record_exists('user_enrolments', array('userid'=>$USER->id, 'enrolid'=>$instance->id))) {
+//            return ob_get_clean();
+//        }
+//
+//        if ($instance->enrolstartdate != 0 && $instance->enrolstartdate > time()) {
+//            return ob_get_clean();
+//        }
+//
+//        if ($instance->enrolenddate != 0 && $instance->enrolenddate < time()) {
+//            return ob_get_clean();
+//        }
+//
+//        $course = $DB->get_record('course', array('id'=>$instance->courseid));
+//        $context = get_context_instance(CONTEXT_COURSE, $course->id);
+//
+//        $uid = $user->id;
+//        // Ignore users from don't_touch list
+//        $ignore = explode(",",$this->config->donttouchusers);
+//
+//        if (!empty($ignore) AND array_search($username, $ignore) !== false) {
+//            $SESSION->mcautoenrolled = TRUE;
+//            return true;
+//        };
+//
+//        // Ignore guests
+//        if ($uid < 2) {
+//            $SESSION->mcautoenrolled = TRUE;
+//            return true;
+//        };
+//        
+//// ********************** Get COHORTS data
+//        $clause = array('contextid'=>$context->id);
+//        if ($this->config->enableunenrol == 1) {
+//            $clause['component'] = 'enrol_mgae';
+//        };
+//
+//        $cohorts = $DB->get_records('cohort', $clause);
+//
+//        $cohorts_list = array();
+//        foreach($cohorts as $cohort) {
+//            $cid = $cohort->id;
+//	    $cname = format_string($cohort->name);
+//            $cohorts_list[$cid] = $cname;
+//        }
+//    
+//        // Get advanced user data
+//        profile_load_data($user);
+//        $cust_arr = array();
+//        foreach ($user as $key => $val){
+//            if (is_array($val)) {
+//                $text = (isset($val['text'])) ? $val['text'] : '';
+//            } else {
+//                $text = $val;
+//            };
+//
+//            // Raw custom profile fields
+//            $fld_key = preg_replace('/profile_field_/', 'profile_field_raw_', $key);
+//            $cust_arr["%$fld_key"] = ($text == '') ? format_string($this->config->secondrule_fld) : format_string($text);
+//        }; 
+//
+//        // Custom profile field values
+//        foreach ($user->profile as $key => $val) {
+//            $cust_arr["%profile_field_$key"] = ($val == '') ? format_string($this->config->secondrule_fld) : format_string($val);
+//        };
+//
+//        // Additional values for email
+//        list($email_username,$email_domain) = explode("@", $cust_arr['%email']);
+//        $cust_arr['%email_username'] = $email_username;
+//        $cust_arr['%email_domain'] = $email_domain;
+//
+//        // Delimiter
+//        $delimiter = $this->config->delim;
+//        $delim = strtr($delimiter, array('CR+LF' => chr(13).chr(10), 'CR' => chr(13), 'LF' => chr(10)));
+//
+//        // Calculate a cohort names for user
+//        $repl_arr_tpl = $this->config->replace_arr;
+//
+//        $repl_arr = array();
+//        if (!empty($repl_arr_tpl)) {
+//            $repl_arr_pre = explode($delim, $repl_arr_tpl);
+//            foreach ($repl_arr_pre as $rap) {
+//                list($key, $val) = explode("|", $rap);
+//                $repl_arr[$key] = $val;
+//            };
+//        };
+//
+//        // Generate cohorts array
+//        $cohorts_arr_tpl = $this->config->mainrule_fld;
+//
+//        $cohorts_arr = array();
+//        if (!empty($cohorts_arr_tpl)) {
+//            $cohorts_arr = explode($delim, $cohorts_arr_tpl);
+//        } else {
+//            $SESSION->mcautoenrolled = TRUE;
+//            return; //Empty mainrule
+//        };
+//        
+//        $processed = array();
+//
+//        foreach ($cohorts_arr as $cohort) {
+//            $cohortname = strtr($cohort, $cust_arr);
+//            $cohortname = (!empty($repl_arr)) ? strtr($cohortname, $repl_arr) : $cohortname;
+//
+//            if ($cohortname == '') {
+//                continue; // We don't want an empty cohort name
+//            };
+//
+//            $cid = array_search($cohortname, $cohorts_list);
+//            if ($cid !== false) {
+//
+//                if (!$DB->record_exists('cohort_members', array('cohortid'=>$cid, 'userid'=>$user->id))) {
+//                    cohort_add_member($cid, $user->id);
+//                    add_to_log(SITEID, 'user', 'Added to cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
+//                } else {
+//                    add_to_log(SITEID, 'user', 'Already exists in cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
+//                };
+//            } else {
+//                // Cohort not exist so create a new one
+//                add_to_log(SITEID, 'user', 'Cohort not exist ID so screate a new one' , "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
+//                $newcohort = new stdClass();
+//                $newcohort->name = $cohortname;
+//                $newcohort->description = "created ". date("d-m-Y");
+//                $newcohort->contextid = $context->id;
+//                if ($this->config->enableunenrol == 1) {
+//                    $newcohort->component = "enrol_mgae";
+//                };
+//                $cid = cohort_add_cohort($newcohort);
+//                cohort_add_member($cid, $user->id);
+//
+//                add_to_log(SITEID, 'user', 'Added to cohort ID ' . $cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
+//            };
+//            $processed[] = $cid;
+//        };
+//        $SESSION->mcautoenrolled = TRUE;
+//        
+//        //Unenrol user
+//        if ($this->config->enableunenrol == 1) {
+//        //List of cohorts where this user enrolled
+//            $sql = "SELECT c.id AS cid FROM {cohort} c JOIN {cohort_members} cm ON cm.cohortid = c.id WHERE c.component = 'enrol_mgae' AND cm.userid = $uid";
+//            $enrolledcohorts = $DB->get_records_sql($sql);
+//
+//            foreach ($enrolledcohorts as $ec) {
+//                if(array_search($ec->cid, $processed) === false) {
+//                    cohort_remove_member($ec->cid, $uid);
+//                    add_to_log(SITEID, 'user', 'Removed from cohort ID ' . $ec->cid, "view.php?id=$user->id&course=".SITEID, $user->id, 0, $user->id);
+//                };
+//            };
+//        };
+//
+//    }
+//
+//}
 
 
 
@@ -381,4 +372,5 @@ function enrol_mgae_supports($feature) {
 
         default: return null;
     }
+}
 }
