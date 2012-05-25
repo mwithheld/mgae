@@ -36,7 +36,7 @@ function debug_output($message) {
         add_to_log(SITEID, 'enrol_mgae', 'sync', '', $message);
         break;
     case 'mtrace':
-        mtrace($message);
+        mtrace($message."<br />\n");
         break;
     }
 }
@@ -52,6 +52,7 @@ function enrol_mgae_sync($courseId=NULL) {
         if($debugThis) debug_output('Enrol mgae called with no courseId');
         $courses = $plugin->get_course_ids_having_groups();
         foreach($courses as $courseId) {
+            echo "Processinc course $courseId";
             enrol_mgae_sync($courseId);
         }
         //don't fall out of the loop and process the first/last item again
