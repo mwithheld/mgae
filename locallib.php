@@ -42,19 +42,21 @@ function debug_output($message) {
 }
 
 function enrol_mgae_sync($courseId=NULL) {
-    global $DB;
+    global $DB, $OUTPUT;
     $debugThis = false;
     $plugin = enrol_get_plugin('mgae');
 
     //If $courseId is not defined, get a list of all courses
     //with groups and process each one
+    $OUTPUT->notification("Processing courses", 'notifysuccess');
     if(empty($courseId)) {
         if($debugThis) debug_output('Enrol mgae called with no courseId');
         $courses = $plugin->get_course_ids_having_groups();
         foreach($courses as $courseId) {
-            echo "Processinc course $courseId";
+            echo '.';
             enrol_mgae_sync($courseId);
         }
+        echo "<br />\n";
         //don't fall out of the loop and process the first/last item again
         return true;
     }

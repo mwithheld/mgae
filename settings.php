@@ -53,6 +53,7 @@ if ($ADMIN->fulltree) {
     $settings->add(new admin_setting_configselect('enrol_mgae/delim', get_string('delim', 'enrol_mgae'), get_string('delim_help', 'enrol_mgae'), 'CR+LF', array('CR+LF'=>'CR+LF', 'CR'=>'CR', 'LF'=>'LF')));
     $settings->add(new admin_setting_configtext('enrol_mgae/secondrule_fld', get_string('secondrule_fld', 'enrol_mgae'),'', 'n/a'));
     $settings->add(new admin_setting_configtextarea('enrol_mgae/replace_arr', get_string('replace_arr', 'enrol_mgae'), '', ''));
+    
     //$settings->add(new admin_setting_configtextarea('enrol_mgae/donttouchusers', get_string('donttouchusers', 'enrol_mgae'), '', ''));
     //$settings->add(new admin_setting_configcheckbox('enrol_mgae/enableunenrol', get_string('enableunenrol', 'enrol_mgae'), '', 0));
 }

@@ -12,11 +12,19 @@ require_once("$CFG->dirroot/enrol/mgae/locallib.php");
  */
 class enrol_mgae_plugin extends enrol_plugin {
 
-    public function get_course_ids_having_groups() {
+    public function get_course_ids_having_groups($groupName='') {
         global $DB;
-        $query = 'SELECT DISTINCT courseid FROM mdl_groups';
-
-        $results = array_values($DB->get_records_sql($query)); 
+        
+        if($groupName) {
+            $where=" WHERE name=?";
+            $query = 'SELECT DISTINCT courseid FROM mdl_groups'.$where;
+            $results = array_values($DB->get_records_sql($query, array($groupName))); 
+        } else {
+            $query = 'SELECT DISTINCT courseid FROM mdl_groups';
+            $results = array_values($DB->get_records_sql($query)); 
+        }
+        
+ 
         $returnThis = array();
         foreach($results as $result) {
             $returnThis[] = $result->courseid;
@@ -193,6 +201,14 @@ class enrol_mgae_plugin extends enrol_plugin {
     
     function enrol_mgae_do_sync($courseId) {
         return enrol_mgae_sync($courseId);
+    }
+    
+    function enrol_mgae_sync_by_groupname($groupName) {
+        $courseIds = $this->get_course_ids_having_groups($groupName);
+        foreach($courseIds as $courseId) {
+            enrol_mgae_sync($courseId);
+        }
+        return true;
     }
     
 //    /**
