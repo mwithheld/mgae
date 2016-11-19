@@ -195,7 +195,7 @@ class auth_plugin_mcae extends auth_plugin_manual {
         // Process templates with Mustache.
         foreach ($templates as $cohort) {
             $cohortname = $this->mustache->render($cohort, $userprofiledata);
-            $cohortname = (!empty($replacements)) ? strtr($cohortname, $replacements) : $cohortname;
+            $cohortname = trim((!empty($replacements)) ? strtr($cohortname, $replacements) : $cohortname);
 
             if ($cohortname == '') {
                 continue; // We don't want an empty cohort name.
